@@ -1,0 +1,5 @@
+# Set the BPM tempo here. This is the same as the tempo field in UTAU.
+# If you want a song to be ignored while creating the dataset (for example because it's LAB is not finished yet)
+# you can either omit or comment out it's tempo here and it will be ignored.
+# Use the LAB/WAV file name without extension
+# Example: FileName 100
