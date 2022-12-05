@@ -1,0 +1,11 @@
+name: "Untitled"
+lang: "Japanese"
+quantization: 60
+songs:
+  - name: Name1
+    tempo: 100
+  - name: Name1
+    tempo: 100
+    flags: F
+  - name: Name3
+    skip: true

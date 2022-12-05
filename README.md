@@ -12,8 +12,8 @@ It expects the same folder structure as enunu.
 
 It was designed for fast prototyping, so it will always overwrite the ust files in the UST folder. Depending on how stable your singing is, manually editing USTs may not even be necessary. FRQ files are not needed and not used.
 
-You may want to edit the short configuration inside makedb.py. And definitely should edit db_name to something more useful.  
-If for whetever reason a song shouldn't be used when creating a DB, simply comment out it's tempo entry in tempos.txt.
+The configuration is stored in config.yaml.
+If for whetever reason a song shouldn't be used when creating a DB, either remove it from config, or mark it with `skip: true`.
 
 ## Thanks
 It's derived from UtaUtaUtaus lab2ust found at https://github.com/UtaUtaUtau/nnsvslabeling  

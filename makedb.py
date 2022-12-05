@@ -10,13 +10,9 @@ import numpy
 import py7zr
 import pyworld as world
 import soundfile
+import yaml
 
 import pyutau
-
-quant_strength = 60
-db_name = "Unnamed"
-lang = "Japanese"
-pps = 200
 
 
 def quantize(x, intensity):
@@ -76,7 +72,7 @@ def base_frq(f0, f0_min=55, f0_max=1760, outliers=0.2, trim=0.2):
     return avg_frq
 
 
-def estimate_pitch(audio_path, f0_min=55, f0_max=1760, pps=10):
+def estimate_pitch(audio_path, f0_min=55, f0_max=1760, pps=200):
     sf, sr = soundfile.read(audio_path)
 
     f0 = world.harvest(sf, sr, f0_min, f0_max, 1000/pps)
@@ -88,46 +84,19 @@ base_wav = "WAV"
 base_pit = "PIT"
 base_ust = "UST"
 base_lab = "LAB"
-tempo_file = "tempos.txt"
-flags_file = "flags.txt"
 languages = None
+config = None
 
 for p in (base_wav, base_pit, base_ust, base_lab):
     if not path.exists(p):
         os.mkdir(p)
 
-for f in (tempo_file, flags_file):
-    if not path.exists(f):
-        open(f, 'a').close()
 
-
-with open('languages.json', encoding='utf-8') as l:
+with open('languages.json', 'r', encoding='utf-8') as l:
     languages = json.load(l)
 
-tempos = {}
-with open(tempo_file, encoding='utf-8') as p:
-    for line in p:
-        l = line.strip()
-        if l.startswith("#") or l == "":
-            continue
-        l = l.split(' ')
-        tempos[l[0]] = l[1]
-
-flags = {}
-with open(flags_file, encoding='utf-8') as p:
-    for line in p:
-        l = line.strip()
-        if l.startswith("#") or l == "":
-            continue
-        l = l.split(' ')
-        flags[l[0]] = l[1]
-
-LABs = []
-
-# Find all labs
-for p in os.listdir(base_lab):
-    if p.endswith(".lab"):
-        LABs.append(p)
+with open('config.yaml', 'r', encoding='utf-8') as c:
+    config = yaml.load(c, yaml.Loader)
 
 
 to_compress = []
@@ -138,27 +107,30 @@ num_songs = 0
 num_wavs_seconds = 0.0
 num_pau_seconds = 0.0
 
-for lab_file in LABs:
-    print("Processing {}".format(lab_file))
+for song in config['songs']:
+    if song.get('skip', False):
+        continue
+    print("Processing {}".format(song['name']))
     ust = pyutau.UtauPlugin.new_empty()
 
     try:
-        ust.settings['Tempo'] = tempos[lab_file[:-4]]
+        ust.settings['Tempo'] = song['tempo']
     except KeyError:
         print("Tempo MISSING")
         continue
 
-    lab_loc = path.join(base_lab, lab_file)
-    pit_loc = path.join(base_pit, lab_file[:-4] + ".npy")
-    wav_loc = path.join(base_wav, lab_file[:-4] + ".wav")
-    ust_loc = path.join(base_ust, lab_file[:-4] + ".ust")
+    lab_loc = path.join(base_lab, song['name'] + ".lab")
+    pit_loc = path.join(base_pit, song['name'] + ".npy")
+    wav_loc = path.join(base_wav, song['name'] + ".wav")
+    ust_loc = path.join(base_ust, song['name'] + ".ust")
 
     print("Reading LAB")
     lab = open(lab_loc).readlines()
     phonemes = []
     duration = []
     pitches = []
-    ups = 480 * float(ust.settings['Tempo']) / 60
+    ups = 480 * float(song['tempo']) / 60
+    pps = 200
 
     # Save phonemes in duration in list. Convert durations to note lengths
     for i in lab:
@@ -178,24 +150,24 @@ for lab_file in LABs:
         frq = numpy.load(pit_loc)
     else:
         print('Estimating pitch...')
-        frq, _ = estimate_pitch(wav_loc, pps=pps)
+        frq, _ = estimate_pitch(wav_loc)
         numpy.save(pit_loc, frq)
 
     print('Generating ust...')
     # Fuse CVs
     for i in range(len(duration) - 1, -1, -1):
-        if phonemes[i] not in languages[lang]['phonemes']:
+        if phonemes[i] not in languages[config['lang']]['phonemes']:
             print("Warning: Bad phoneme {} at {}".format(
                 phonemes[i], i+1))
             errors = True
-        if phonemes[i][0] not in languages[lang]['vowels']:
-            if phonemes[i] in languages[lang]['standalone']:
+        if phonemes[i][0] not in languages[config['lang']]['vowels']:
+            if phonemes[i] in languages[config['lang']]['standalone']:
                 continue
             else:
-                if phonemes[i+1][0] in languages[lang]['vowels']:
+                if phonemes[i+1][0] in languages[config['lang']]['vowels']:
                     np = phonemes[i] + phonemes[i+1]
-                    if 'conversions' in languages[lang]:
-                        if np not in languages[lang]['conversions']:
+                    if 'conversions' in languages[config['lang']]:
+                        if np not in languages[config['lang']]['conversions']:
                             print("Waring, unknown lyric: {} at position {}".format(
                                 note.lyric, i+1))
                             errors = True
@@ -230,30 +202,31 @@ for lab_file in LABs:
             duration[i] = 15
 
     for i in range(0, len(duration) - 1):
-        quant_dur = quantize(duration[i], quant_strength)
+        quant_dur = quantize(duration[i], config['quantization'])
         error = duration[i] - quant_dur
         duration[i] = quant_dur
         duration[i+1] += error
 
-    duration[-1] = quantize(duration[-1], quant_strength)
+    duration[-1] = quantize(duration[-1], config['quantization'])
 
     for i in range(0, len(duration)):
         note = pyutau.create_note(phonemes[i] if phonemes[i] not in
-                                  languages[lang]['silences'] else 'R', duration[i], note_num=pitches[i])
+                                  languages[config['lang']]['silences'] else 'R', duration[i], note_num=pitches[i])
         note.note_type = "{:04d}".format(i)
         if note.lyric == 'R':
             note.note_num = 60
         else:
-            if 'conversions' in languages[lang]:
+            if 'conversions' in languages[config['lang']]:
                 try:
-                    note.lyric = languages[lang]['conversions'][note.lyric]
+                    note.lyric = languages[config['lang']
+                                           ]['conversions'][note.lyric]
                 except KeyError:
                     print("Waring, unknown lyric: {} at position {}".format(
                         note.lyric, i))
                     errors = True
 
         try:
-            note.set_custom_data("Flags", flags[lab_file[:-4]])
+            note.set_custom_data("Flags", song['flags'])
         except KeyError:
             pass
         ust.notes.append(note)
@@ -281,7 +254,7 @@ if not errors:
     filters = [{'id': py7zr.FILTER_DELTA}, {
         'id': py7zr.FILTER_LZMA2, 'preset': py7zr.PRESET_DEFAULT}]
 
-    with py7zr.SevenZipFile(db_name+'.7z', 'w', filters=filters) as archive:
+    with py7zr.SevenZipFile(config['name']+'.7z', 'w', filters=filters) as archive:
         for f in to_compress:
             print("Adding {}".format(f))
             archive.write(f)

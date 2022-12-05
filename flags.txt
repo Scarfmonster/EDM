@@ -1,3 +1,0 @@
-# If you have a whole wav recorded as a particular flag, you can set it here
-# Use the LAB/WAV file name without extension
-# Example: FileName SF
