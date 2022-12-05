@@ -1,18 +1,21 @@
 import contextlib
 import datetime
+import json
 import math
 import os
 import os.path as path
 import wave
 
-import pyutau
+import numpy
 import py7zr
 import pyworld as world
 import soundfile
-import numpy
+
+import pyutau
 
 quant_strength = 60
 db_name = "Unnamed"
+lang = "Japanese"
 pps = 200
 
 
@@ -87,6 +90,7 @@ base_ust = "UST"
 base_lab = "LAB"
 tempo_file = "tempos.txt"
 flags_file = "flags.txt"
+languages = None
 
 for p in (base_wav, base_pit, base_ust, base_lab):
     if not path.exists(p):
@@ -97,14 +101,8 @@ for f in (tempo_file, flags_file):
         open(f, 'a').close()
 
 
-romaji_map = {}
-with open('phonemes.txt', encoding='utf-8') as p:
-    for line in p:
-        l = line.strip()
-        if l.startswith("#") or l == "":
-            continue
-        l = l.split('=')
-        romaji_map[l[0]] = l[1]
+with open('languages.json', encoding='utf-8') as l:
+    languages = json.load(l)
 
 tempos = {}
 with open(tempo_file, encoding='utf-8') as p:
@@ -185,29 +183,26 @@ for lab_file in LABs:
 
     print('Generating ust...')
     # Fuse CVs
-    vowels = ['a', 'i', 'u', 'e', 'o', 'A', 'I', 'U', 'E', 'O']
-    standalone = ['N', 'cl', 'pau', 'br', 'vf', 'sil']
     for i in range(len(duration) - 1, -1, -1):
-        if phonemes[i][0] not in vowels:
-            if phonemes[i] in standalone:
+        if phonemes[i] not in languages[lang]['phonemes']:
+            print("Warning: Bad phoneme {} at {}".format(
+                phonemes[i], i+1))
+            errors = True
+        if phonemes[i][0] not in languages[lang]['vowels']:
+            if phonemes[i] in languages[lang]['standalone']:
                 continue
             else:
-                if phonemes[i+1][0] in vowels:
+                if phonemes[i+1][0] in languages[lang]['vowels']:
                     np = phonemes[i] + phonemes[i+1]
-                    try:
-                        romaji_map[np]
-                    except KeyError:
-                        print("Waring, unknown lyric: {} at position {}".format(
-                            note.lyric, i+1))
-                        errors = True
+                    if 'conversions' in languages[lang]:
+                        if np not in languages[lang]['conversions']:
+                            print("Waring, unknown lyric: {} at position {}".format(
+                                note.lyric, i+1))
+                            errors = True
                     phonemes[i+1] = np
                     duration[i-1] += duration[i]
                     del duration[i]
                     del phonemes[i]
-                else:
-                    print("Warning: Bad phoneme {} at {}".format(
-                        phonemes[i], i+1))
-                    errors = True
 
     start = 0
     for i in range(len(duration)):
@@ -243,17 +238,19 @@ for lab_file in LABs:
     duration[-1] = quantize(duration[-1], quant_strength)
 
     for i in range(0, len(duration)):
-        note = pyutau.create_note(phonemes[i] if phonemes[i] not in [
-            'pau', 'sil'] else 'R', duration[i], note_num=pitches[i])
+        note = pyutau.create_note(phonemes[i] if phonemes[i] not in
+                                  languages[lang]['silences'] else 'R', duration[i], note_num=pitches[i])
         note.note_type = "{:04d}".format(i)
         if note.lyric == 'R':
             note.note_num = 60
         else:
-            try:
-                note.lyric = romaji_map[note.lyric]
-            except KeyError:
-                print("Waring, unknown lyric: {} at position {}".format(note.lyric, i))
-                errors = True
+            if 'conversions' in languages[lang]:
+                try:
+                    note.lyric = languages[lang]['conversions'][note.lyric]
+                except KeyError:
+                    print("Waring, unknown lyric: {} at position {}".format(
+                        note.lyric, i))
+                    errors = True
 
         try:
             note.set_custom_data("Flags", flags[lab_file[:-4]])
